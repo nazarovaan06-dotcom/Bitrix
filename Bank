@@ -1,0 +1,87 @@
+import re
+from datetime import date
+MAX_YEARS_AHEAD = 10
+AMEX_PREFIXES = ("34", "37")
+CARD_NUMBER_PATTERN = re.compile(r"^\d{13,19}$")
+EXPIRY_PATTERN = re.compile(r"^(\d{1,2})/(\d{2}|\d{4})$")
+NAME_PATTERN = re.compile(r"^[A-Za-z ]{2,26}$")
+def passes_luhn_check(card_number):
+    total = 0
+    for position, char in enumerate(reversed(card_number)):
+        digit = int(char)
+        if position % 2 == 1:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return total % 10 == 0
+def validate_card_number(raw_number):
+    if not isinstance(raw_number, str):
+        return "", "Неверный номер карты (формат)"
+    card_number = raw_number.replace(" ", "").replace("-", "")
+    if not CARD_NUMBER_PATTERN.match(card_number):
+        return card_number, "Неверный номер карты (нужно 13-19 цифр)"
+    if not passes_luhn_check(card_number):
+        return card_number, "Неверный номер карты (алгоритм Луна)"
+    return card_number, None
+def validate_expiry(raw_expiry, today):
+    if not isinstance(raw_expiry, str):
+        return "Неверный срок действия (формат ММ/ГГ)"
+    match = EXPIRY_PATTERN.match(raw_expiry.strip())
+    if match is None:
+        return "Неверный срок действия (формат ММ/ГГ)"
+    month, year = int(match.group(1)), int(match.group(2))
+    if year < 100:
+        year += 2000
+    if not 1 <= month <= 12:
+        return "Неверный срок действия (месяц должен быть 1-12)"
+    expiry = (year, month) 
+    if expiry < (today.year, today.month):
+        return "Срок действия карты истёк"
+    if expiry > (today.year + MAX_YEARS_AHEAD, today.month):
+        return f"Срок действия более {MAX_YEARS_AHEAD} лет от текущей даты"
+    return None
+def validate_cvv(raw_cvv, is_amex):
+    expected_length = 4 if is_amex else 3
+    if not isinstance(raw_cvv, str) or not raw_cvv.isascii() or not raw_cvv.isdigit():
+        return "Неверный CVV (только цифры)"
+    if len(raw_cvv) != expected_length:
+        return f"Неверный CVV (нужно {expected_length} цифры)"
+    return None
+def validate_holder_name(raw_name):
+    if not isinstance(raw_name, str):
+        return "Неверное имя держателя"
+    name = raw_name.strip()
+    if not NAME_PATTERN.match(name) or not name.replace(" ", ""):
+        return "Неверное имя держателя (латинские буквы и пробелы, 2-26 символов)"
+    return None
+def validate_card(card_number, expiry, cvv, holder_name, today=None):
+    """Возвращает список ошибок. Пустой список означает, что карта валидна."""
+    today = today or date.today()
+    clean_number, number_error = validate_card_number(card_number)
+    is_amex = clean_number.startswith(AMEX_PREFIXES)
+    checks = (
+        number_error,
+        validate_expiry(expiry, today),
+        validate_cvv(cvv, is_amex),
+        validate_holder_name(holder_name),
+    )
+    return [error for error in checks if error]
+def format_result(errors):
+    return "Карта валидна" if not errors else "; ".join(errors)
+if __name__ == "__main__":
+    today = date(2026, 10, 22)  
+
+    def check(args, expected):
+        actual = format_result(validate_card(*args, today=today))
+        assert actual == expected, f"{args}: ожидали {expected!r}, получили {actual!r}"
+    check(("4532015112830366", "12/28", "123", "JOHN DOE"), "Карта валидна")
+    check(("4532015112830367", "12/28", "123", "JOHN DOE"),
+          "Неверный номер карты (алгоритм Луна)")
+    check(("4532 0151 1283 0366", "12/28", "123", "JOHN DOE"), "Карта валидна")
+    check(("378282246310005", "12/28", "1234", "JOHN DOE"), "Карта валидна")   # Amex
+    check(("378282246310005", "12/28", "123", "JOHN DOE"),
+          "Неверный CVV (нужно 4 цифры)")
+    check(("4532015112830366", "12/28", "1234", "JOHN DOE"),
+          "Неверный CVV (нужно 3 цифры)")
+    check
